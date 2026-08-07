@@ -16,7 +16,6 @@ column_names = [
     "label", "difficulty"
 ]
 
-# Chargement du dataset
 train_df = pd.read_csv("data/KDDTrain.txt", names=column_names)
 test_df = pd.read_csv("data/KDDTest.txt", names=column_names)
 
@@ -24,33 +23,46 @@ print("Forme du train :", train_df.shape)
 print("Forme du test :", test_df.shape)
 print(train_df.head())
 
-# Création du label binaire : 0 = normal, 1 = attaque
-train_df["binary_label"] = train_df["label"].apply(lambda x: 0 if x == "normal" else 1)
-test_df["binary_label"] = test_df["label"].apply(lambda x: 0 if x == "normal" else 1)
+# ===== CHANGÉ : multi-classe au lieu de binaire =====
+attack_mapping = {
+    'normal': 'normal',
+    'neptune': 'dos', 'smurf': 'dos', 'back': 'dos', 'teardrop': 'dos',
+    'pod': 'dos', 'land': 'dos', 'apache2': 'dos', 'udpstorm': 'dos',
+    'processtable': 'dos', 'mailbomb': 'dos', 'worm': 'dos',
+    'satan': 'probe', 'ipsweep': 'probe', 'nmap': 'probe', 'portsweep': 'probe',
+    'mscan': 'probe', 'saint': 'probe',
+    'guess_passwd': 'r2l', 'ftp_write': 'r2l', 'imap': 'r2l', 'phf': 'r2l',
+    'multihop': 'r2l', 'warezmaster': 'r2l', 'warezclient': 'r2l', 'spy': 'r2l',
+    'xlock': 'r2l', 'xsnoop': 'r2l', 'snmpguess': 'r2l', 'snmpgetattack': 'r2l',
+    'httptunnel': 'r2l', 'sendmail': 'r2l', 'named': 'r2l',
+    'buffer_overflow': 'u2r', 'loadmodule': 'u2r', 'rootkit': 'u2r',
+    'perl': 'u2r', 'sqlattack': 'u2r', 'xterm': 'u2r', 'ps': 'u2r'
+}
+
+train_df["attack_category"] = train_df["label"].map(attack_mapping)
+test_df["attack_category"] = test_df["label"].map(attack_mapping)
+
+
+print("\nValeurs manquantes après mapping (train) :", train_df["attack_category"].isnull().sum())
+print("Valeurs manquantes après mapping (test) :", test_df["attack_category"].isnull().sum())
 
 print("\nRépartition train :")
-print(train_df["binary_label"].value_counts())
-
+print(train_df["attack_category"].value_counts())
 print("\nRépartition test :")
-print(test_df["binary_label"].value_counts())
+print(test_df["attack_category"].value_counts())
 
 
 from sklearn.preprocessing import LabelEncoder
 
 categorical_cols = ["protocol_type", "service", "flag"]
-
 encoders = {}
 
 for col in categorical_cols:
     le = LabelEncoder()
-    # On entraîne l'encodeur sur le train ET le test combinés
-    # pour être sûr qu'aucune valeur du test ne soit "inconnue"
     combined = pd.concat([train_df[col], test_df[col]])
     le.fit(combined)
-
     train_df[col] = le.transform(train_df[col])
     test_df[col] = le.transform(test_df[col])
-
     encoders[col] = le
 
 print("\nExemple après encodage (protocol_type, service, flag) :")
@@ -58,13 +70,11 @@ print(train_df[["protocol_type", "service", "flag"]].head())
 
 from sklearn.preprocessing import StandardScaler
 
-# Colonnes à exclure de la normalisation 
-exclude_cols = ["protocol_type", "service", "flag", "label", "difficulty", "binary_label"]
+# ===== CHANGÉ : on exclut attack_category au lieu de binary_label =====
+exclude_cols = ["protocol_type", "service", "flag", "label", "difficulty", "attack_category"]
 numeric_cols = [col for col in train_df.columns if col not in exclude_cols]
 
 scaler = StandardScaler()
-
-# On apprend la moyenne/écart-type UNIQUEMENT sur le train (règle d'or en ML)
 train_df[numeric_cols] = scaler.fit_transform(train_df[numeric_cols])
 test_df[numeric_cols] = scaler.transform(test_df[numeric_cols])
 
@@ -74,28 +84,24 @@ print(train_df[["duration", "src_bytes", "dst_bytes"]].head())
 import joblib
 import os
 
-# Colonnes qu'on utilise vraiment pour entraîner (on retire label texte, difficulty, binary_label)
-feature_cols = [col for col in train_df.columns if col not in ["label", "difficulty", "binary_label"]]
+# ===== CHANGÉ : feature_cols exclut attack_category, y_train/y_test utilisent attack_category =====
+feature_cols = [col for col in train_df.columns if col not in ["label", "difficulty", "attack_category"]]
 
 X_train = train_df[feature_cols]
-y_train = train_df["binary_label"]
+y_train = train_df["attack_category"]
 
 X_test = test_df[feature_cols]
-y_test = test_df["binary_label"]
+y_test = test_df["attack_category"]
 
 print("\nX_train shape:", X_train.shape)
 print("y_train shape:", y_train.shape)
 
-# Création du dossier models si besoin
 os.makedirs("models", exist_ok=True)
 
-# Sauvegarde des données prêtes à l'emploi
 joblib.dump(X_train, "data/X_train.pkl")
 joblib.dump(y_train, "data/y_train.pkl")
 joblib.dump(X_test, "data/X_test.pkl")
 joblib.dump(y_test, "data/y_test.pkl")
-
-# Sauvegarde des encodeurs et du scaler 
 joblib.dump(encoders, "models/encoders.pkl")
 joblib.dump(scaler, "models/scaler.pkl")
 
